@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"maps"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -71,17 +72,18 @@ func (b *bot) popRandomCandidate() (id int64, name string, ok bool) {
 	if len(ids) == 0 {
 		return 0, "", false
 	}
-	id = random(ids)
+	id = ids[rand.IntN(len(ids))]
 	name = b.Candidates[id]
 	clear(b.Candidates)
 	b.save()
 	return id, name, true
 }
 
-func init() {
+// openDB opens the database; called from main so tests never touch real data.
+func openDB() {
 	cd, err := os.UserCacheDir()
 	if err != nil {
-		log.Fatal("init", "os.UserCacheDir", err)
+		log.Fatal("openDB", "os.UserCacheDir", err)
 	}
 
 	db, err = katalis.OpenOptions(
@@ -89,11 +91,12 @@ func init() {
 		katalis.Int64Codec,
 		katalis.Gob[session](),
 		&katalis.Options{
-			BackgroundSyncInterval:       500 * time.Millisecond,
+			// -1 syncs on every write: writes are rare, polling fsync is not.
+			BackgroundSyncInterval:       -1,
 			BackgroundCompactionInterval: 24 * time.Hour,
 		},
 	)
 	if err != nil {
-		log.Fatal("init", "katalis.OpenOptions", err)
+		log.Fatal("openDB", "katalis.OpenOptions", err)
 	}
 }

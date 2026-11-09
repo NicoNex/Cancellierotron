@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"log"
-	"math/rand/v2"
 	"os"
 	"os/signal"
 	"strings"
@@ -37,10 +36,16 @@ var (
 
 type stateFn func(*echotron.Update) stateFn
 
+// pending is a user's ongoing operation, dropped once deadline passes.
+type pending struct {
+	fn       stateFn
+	deadline time.Time
+}
+
 type bot struct {
 	chatID int64
 	// usrstate holds the pending operation of each user; Update runs concurrently.
-	usrstate safemap.Map[int64, stateFn]
+	usrstate safemap.Map[int64, pending]
 	mu       sync.Mutex // guards session: Update and tick run concurrently
 	session
 	echotron.API
@@ -57,77 +62,76 @@ func newBot(chatID int64) echotron.Bot {
 		chatID: chatID,
 		API:    echotron.NewAPI(token),
 	}
-	if err := b.init(); err != nil {
-		log.Println("newBot", "b.init", err)
+
+	// katalis.Get fails (EOF) on a missing key, so check existence first.
+	if ok, err := db.Has(chatID); err != nil {
+		log.Println("newBot", "db.Has", err)
+	} else if ok {
+		if b.session, err = db.Get(chatID); err != nil {
+			log.Println("newBot", "db.Get", err)
+		}
+	} else {
+		// Persist new chats so they are restored at the next startup.
+		defer b.save()
+	}
+	if b.Candidates == nil {
+		b.Candidates = make(map[int64]string)
 	}
 	go b.tick()
 
 	return b
 }
 
-func (b *bot) init() error {
-	sess, err := db.Get(b.chatID)
-	if err != nil {
-		return err
-	}
-	b.session = sess
-	if b.Candidates == nil {
-		b.Candidates = make(map[int64]string)
-	}
-	// Persist right away so the chat is restored at the next startup.
-	b.save()
-	return nil
-}
-
 func (b *bot) Update(update *echotron.Update) {
-	uid := userID(update)
+	if update.CallbackQuery != nil {
+		b.handleCallback(update.CallbackQuery)
+		return
+	}
+	if update.Message == nil {
+		return
+	}
 
-	// Only messages feed a pending operation, so callbacks keep working meanwhile.
-	if state, ok := b.usrstate.Load(uid); ok && update.Message != nil {
-		if next := state(update); next != nil {
-			b.usrstate.Store(uid, next)
-		} else {
-			b.usrstate.Delete(uid)
+	uid := userID(update)
+	// LoadAndDelete keeps two quick messages from running the same state twice.
+	if p, ok := b.usrstate.LoadAndDelete(uid); ok && time.Now().Before(p.deadline) {
+		if next := p.fn(update); next != nil {
+			b.usrstate.Store(uid, pending{next, p.deadline})
 		}
 		return
 	}
 	if next := b.handleMessage(update); next != nil {
-		b.usrstate.Store(uid, next)
+		b.usrstate.Store(uid, pending{next, time.Now().Add(stateTimeout)})
 	}
 }
 
-// expiring wraps fn so that after deadline the pending operation is dropped
-// and the update is handled as a normal message.
-func (b *bot) expiring(deadline time.Time, fn stateFn) stateFn {
-	return func(update *echotron.Update) stateFn {
-		if time.Now().After(deadline) {
-			return b.handleMessage(update)
-		}
-		if next := fn(update); next != nil {
-			return b.expiring(deadline, next)
-		}
-		return nil
-	}
+// command returns the command in msg without the "@botname" suffix, or "".
+func command(msg string) string {
+	word, _, _ := strings.Cut(msg, " ")
+	cmd, _, _ := strings.Cut(word, "@")
+	return cmd
 }
 
 func (b *bot) handleMessage(update *echotron.Update) stateFn {
-	if update.CallbackQuery != nil {
-		b.handleCallback(update.CallbackQuery)
+	cmd := command(update.Message.Text)
+	switch cmd {
+	case "/annulla", "/luogo", "/cancella_luogo":
+	default:
 		return nil
 	}
-	if update.Message == nil {
+	// Every command is admin-only; check once, after filtering out plain chat.
+	if !b.isAdmin(userID(update)) {
 		return nil
 	}
 
-	switch msg := update.Message.Text; {
-	case strings.HasPrefix(msg, "/annulla") && b.isAdmin(userID(update)):
+	switch cmd {
+	case "/annulla":
 		b.cancelMeeting()
 
-	case strings.HasPrefix(msg, "/cancella_luogo") && b.isAdmin(userID(update)):
+	case "/cancella_luogo":
 		b.setPlace("")
 		b.messagef("Il luogo dell'incontro è stato rimosso.")
 
-	case strings.HasPrefix(msg, "/luogo") && b.isAdmin(userID(update)):
+	case "/luogo":
 		_, err := b.SendMessage(
 			"Indica il luogo dell'incontro rispondendo a questo messaggio.\nPer annullare invia /annulla.",
 			b.chatID,
@@ -144,7 +148,7 @@ func (b *bot) handleMessage(update *echotron.Update) stateFn {
 			log.Println("b.handleMessage", "b.SendMessage", err)
 			return nil
 		}
-		return b.expiring(time.Now().Add(stateTimeout), b.setPlaceState)
+		return b.setPlaceState
 	}
 
 	return nil
@@ -152,7 +156,8 @@ func (b *bot) handleMessage(update *echotron.Update) stateFn {
 
 func (b *bot) setPlaceState(update *echotron.Update) stateFn {
 	switch msg := strings.TrimSpace(update.Message.Text); {
-	case strings.HasPrefix(msg, "/annulla"):
+	// Any command aborts, so it is never saved as the place.
+	case strings.HasPrefix(msg, "/"):
 		b.messagef("Operazione annullata.")
 		return nil
 
@@ -231,8 +236,9 @@ func (b *bot) drawPicker() {
 
 	_, err := b.SendMessage(
 		fmt.Sprintf(
-			"📚 È stato estratto/a %s, a cui spetta la scelta del libro del mese. Attendiamo il titolo.",
-			fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, id, html.EscapeString(name)),
+			`📚 È stato estratto/a <a href="tg://user?id=%d">%s</a>, a cui spetta la scelta del libro del mese. Attendiamo il titolo.`,
+			id,
+			html.EscapeString(name),
 		),
 		b.chatID,
 		&echotron.MessageOptions{ParseMode: echotron.HTML},
@@ -248,10 +254,9 @@ func (b *bot) sendReminder() {
 	b.mu.Unlock()
 
 	if place != "" {
-		b.messagef("Si ricorda che oggi alle 18:30 si terrà l'incontro.\nLuogo: %s", place)
-	} else {
-		b.messagef("Si ricorda che oggi alle 18:30 si terrà l'incontro.")
+		place = "\nLuogo: " + place
 	}
+	b.messagef("Si ricorda che oggi alle 18:30 si terrà l'incontro.%s", place)
 
 	_, err := b.SendPoll(
 		b.chatID,
@@ -297,10 +302,6 @@ func (b *bot) isAdmin(id int64) bool {
 	return res.Result != nil && (res.Result.Status == "creator" || res.Result.Status == "administrator")
 }
 
-func random[T any](list []T) T {
-	return list[rand.IntN(len(list))]
-}
-
 func userID(u *echotron.Update) int64 {
 	switch {
 	case u.Message != nil && u.Message.From != nil:
@@ -315,11 +316,14 @@ func userID(u *echotron.Update) int64 {
 func main() {
 	flag.StringVar(&token, "t", token, "The Telegram token of the bot.")
 	flag.Parse()
+	// An editor may leave a trailing newline in the TOKEN file.
+	token = strings.TrimSpace(token)
 
 	var err error
 	if rome, err = time.LoadLocation("Europe/Rome"); err != nil {
 		log.Fatal("main", "time.LoadLocation", err)
 	}
+	openDB()
 
 	// Intercept SIGINT and SIGTERM and gracefully close the DB.
 	sigChan := make(chan os.Signal, 1)
@@ -347,8 +351,11 @@ func main() {
 		log.Printf("starting dispatcher session with ID: %d", id)
 		dsp.AddSession(id)
 	}
+	// Drop the backlog only at startup; retries after a network error keep it.
+	drop := true
 	for {
-		log.Println(dsp.PollOptions(true, dopts))
+		log.Println(dsp.PollOptions(drop, dopts))
+		drop = false
 		time.Sleep(5 * time.Second)
 	}
 }

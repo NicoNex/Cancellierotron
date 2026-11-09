@@ -22,20 +22,37 @@ func TestNextMeeting(t *testing.T) {
 	}
 }
 
-func TestExpiring(t *testing.T) {
+func TestPendingExpiry(t *testing.T) {
 	var b bot
 	called := 0
 	var fn stateFn
 	fn = func(*echotron.Update) stateFn { called++; return fn }
-	msg := &echotron.Update{Message: &echotron.Message{Text: "ciao"}}
+	msg := &echotron.Update{Message: &echotron.Message{Text: "ciao", From: &echotron.User{ID: 1}}}
 
-	// Before the deadline fn runs and stays wrapped.
-	next := b.expiring(time.Now().Add(time.Hour), fn)(msg)
-	if called != 1 || next == nil {
-		t.Fatalf("before deadline: called=%d next=%v", called, next != nil)
+	// Before the deadline the state runs and stays pending.
+	b.usrstate.Store(1, pending{fn, time.Now().Add(time.Hour)})
+	b.Update(msg)
+	if _, ok := b.usrstate.Load(1); called != 1 || !ok {
+		t.Fatalf("before deadline: called=%d pending=%v", called, ok)
 	}
-	// After the deadline fn is skipped and the state ends.
-	if next := b.expiring(time.Now().Add(-time.Second), fn)(msg); called != 1 || next != nil {
-		t.Fatalf("after deadline: called=%d next=%v", called, next != nil)
+
+	// After the deadline the state is dropped without running.
+	b.usrstate.Store(1, pending{fn, time.Now().Add(-time.Second)})
+	b.Update(msg)
+	if _, ok := b.usrstate.Load(1); called != 1 || ok {
+		t.Fatalf("after deadline: called=%d pending=%v", called, ok)
+	}
+}
+
+func TestCommand(t *testing.T) {
+	for in, want := range map[string]string{
+		"/luogo":           "/luogo",
+		"/luogo@bot extra": "/luogo",
+		"/annullaqualcosa": "/annullaqualcosa",
+		"ciao /annulla":    "ciao",
+	} {
+		if got := command(in); got != want {
+			t.Errorf("command(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
