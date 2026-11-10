@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -67,20 +68,38 @@ func TestCandidacyWindow(t *testing.T) {
 	defer db.Close()
 
 	b := bot{chatID: 1, session: session{Candidates: map[int64]string{}}}
-	if b.addCandidate(0, 1, "a") {
+	if open, _ := b.addCandidate(0, 1, "a"); open {
 		t.Fatal("candidacy accepted before opening")
 	}
 	b.openCandidacy(42)
-	if b.addCandidate(41, 1, "a") {
+	if open, _ := b.addCandidate(41, 1, "a"); open {
 		t.Fatal("candidacy accepted from an old message")
 	}
-	if !b.addCandidate(42, 1, "a") {
-		t.Fatal("candidacy rejected while open")
+	for _, c := range []struct {
+		id   int64
+		name string
+	}{{1, "a"}, {2, "Bea"}} {
+		if open, changed := b.addCandidate(42, c.id, c.name); !open || !changed {
+			t.Fatalf("candidacy %q rejected while open", c.name)
+		}
 	}
+	if _, changed := b.addCandidate(42, 1, "a"); changed {
+		t.Fatal("re-adding the same candidate reported a change")
+	}
+	if got := candidacyText(b.candidateNames()); !strings.HasSuffix(got, "Candidati:\n• Bea\n• a") {
+		t.Fatalf("candidacyText = %q", got)
+	}
+	if _, changed := b.removeCandidate(42, 3); changed {
+		t.Fatal("removing a non-candidate reported a change")
+	}
+	b.removeCandidate(42, 2)
 	if got := b.closeCandidacy(); got != 42 {
 		t.Fatalf("closeCandidacy = %d, want 42", got)
 	}
-	if b.addCandidate(42, 2, "b") || b.removeCandidate(42, 1) {
+	if open, _ := b.addCandidate(42, 2, "b"); open {
+		t.Fatal("candidacy changed after closing")
+	}
+	if open, _ := b.removeCandidate(42, 1); open {
 		t.Fatal("candidacy changed after closing")
 	}
 }

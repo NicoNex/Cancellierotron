@@ -13,10 +13,14 @@ import (
 	"syscall"
 	"time"
 	_ "time/tzdata" // Europe/Rome must load even on hosts without zoneinfo.
+	"unicode/utf16"
 
 	"github.com/NicoNex/echotron/v3"
 	"github.com/NicoNex/safemap"
 )
+
+// maxPlaceLen keeps the place within the poll question, which Telegram caps at 300 characters.
+const maxPlaceLen = 200
 
 var (
 	//go:embed TOKEN
@@ -26,6 +30,9 @@ var (
 
 	// stateTimeout is how long a pending operation (e.g. /luogo) waits for the reply.
 	stateTimeout = 5 * time.Minute
+
+	// infoURL is the group info page; a telegra.ph page opens in Telegram's Instant View.
+	infoURL = "https://telegra.ph/"
 
 	commands = []echotron.BotCommand{
 		{Command: "/annulla", Description: "Annulla l'incontro di sabato (solo admin)."},
@@ -90,6 +97,10 @@ func (b *bot) Update(update *echotron.Update) {
 	if update.Message == nil {
 		return
 	}
+	if len(update.Message.NewChatMembers) > 0 {
+		b.welcome(update.Message.NewChatMembers)
+		return
+	}
 
 	uid := userID(update)
 	// LoadAndDelete keeps two quick messages from running the same state twice.
@@ -114,7 +125,7 @@ func command(msg string) string {
 func (b *bot) handleMessage(update *echotron.Update) stateFn {
 	cmd := command(update.Message.Text)
 	switch cmd {
-	case "/annulla", "/luogo", "/cancella_luogo":
+	case "/annulla", "/luogo", "/cancella_luogo", "/debug":
 	default:
 		return nil
 	}
@@ -127,20 +138,33 @@ func (b *bot) handleMessage(update *echotron.Update) stateFn {
 	case "/annulla":
 		b.cancelMeeting()
 
+	// /debug is left out of commands so it stays hidden from the UI.
+	case "/debug":
+		var kbd [][]echotron.InlineKeyboardButton
+		for _, a := range debugActions {
+			kbd = append(kbd, []echotron.InlineKeyboardButton{{Text: a.label, CallbackData: a.data}})
+		}
+		_, err := b.SendMessage("🛠 Debug: scegli la funzione da eseguire subito.", b.chatID, &echotron.MessageOptions{
+			ReplyMarkup: echotron.InlineKeyboardMarkup{InlineKeyboard: kbd},
+		})
+		if err != nil {
+			log.Println("b.handleMessage", "b.SendMessage", err)
+		}
+
 	case "/cancella_luogo":
 		b.setPlace("")
 		b.messagef("Il luogo dell'incontro è stato rimosso.")
 
 	case "/luogo":
 		_, err := b.SendMessage(
-			"Indica il luogo dell'incontro rispondendo a questo messaggio.\nPer annullare invia /annulla.",
+			"Indica il luogo dell'incontro rispondendo a questo messaggio, con la preposizione davanti (es. \"al Vergnano\").\nPer annullare invia /annulla.",
 			b.chatID,
 			&echotron.MessageOptions{
 				ReplyParameters: echotron.ReplyParameters{MessageID: update.Message.ID},
 				ReplyMarkup: echotron.ForceReply{
 					ForceReply:            true,
 					Selective:             true,
-					InputFieldPlaceholder: "Luogo dell'incontro",
+					InputFieldPlaceholder: "al Vergnano",
 				},
 			},
 		)
@@ -165,6 +189,11 @@ func (b *bot) setPlaceState(update *echotron.Update) stateFn {
 		b.messagef("Il luogo deve essere un messaggio di testo. Riprova.")
 		return b.setPlaceState
 
+	// Telegram counts length in UTF-16 code units, so emoji count double.
+	case len(utf16.Encode([]rune(msg))) > maxPlaceLen:
+		b.messagef("Il luogo è troppo lungo (massimo %d caratteri). Riprova.", maxPlaceLen)
+		return b.setPlaceState
+
 	default:
 		b.setPlace(msg)
 		b.messagef("Luogo dell'incontro impostato: %s", msg)
@@ -179,20 +208,90 @@ func (b *bot) handleCallback(q *echotron.CallbackQuery) {
 	}
 
 	text := "Le candidature sono chiuse."
+	var open, changed bool
 	switch q.Data {
 	case "candidati":
-		if b.addCandidate(msgID, q.From.ID, q.From.FirstName) {
+		if open, changed = b.addCandidate(msgID, q.From.ID, q.From.FirstName); open {
 			text = "Candidatura registrata."
 		}
 	case "ritira":
-		if b.removeCandidate(msgID, q.From.ID) {
+		if open, changed = b.removeCandidate(msgID, q.From.ID); changed {
 			text = "Candidatura ritirata."
+		} else if open {
+			text = "Non risultavi tra i candidati."
+		}
+	default:
+		for _, a := range debugActions {
+			if a.data != q.Data {
+				continue
+			}
+			// The debug keyboard is visible to the whole group, so recheck here.
+			text = "Solo gli admin possono usare il debug."
+			if b.isAdmin(q.From.ID) {
+				text = "Fatto."
+				a.run(b, q)
+			}
 		}
 	}
 
+	// Answer first so the button stops spinning before the edit round trip.
 	_, err := b.AnswerCallbackQuery(q.ID, &echotron.CallbackQueryOptions{Text: text})
 	if err != nil {
 		log.Println("b.handleCallback", "b.AnswerCallbackQuery", err)
+	}
+	if changed {
+		b.updateCandidacy(msgID)
+	}
+}
+
+// debugActions are the jobs /debug can run on demand; it lists them in this order.
+var debugActions = []struct {
+	label, data string
+	run         func(*bot, *echotron.CallbackQuery)
+}{
+	{"Apri candidature", "debug_candidature", func(b *bot, _ *echotron.CallbackQuery) { b.sendCandidacy() }},
+	{"Estrai candidato", "debug_estrazione", func(b *bot, _ *echotron.CallbackQuery) { b.drawPicker() }},
+	{"Promemoria sabato", "debug_promemoria", func(b *bot, _ *echotron.CallbackQuery) { b.sendReminder() }},
+	{"Benvenuto", "debug_benvenuto", func(b *bot, q *echotron.CallbackQuery) { b.welcome([]*echotron.User{q.From}) }},
+}
+
+// mention is an HTML link to the user's profile.
+func mention(id int64, name string) string {
+	return fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, id, html.EscapeString(name))
+}
+
+// welcome greets the new human members with a button to the group info page.
+func (b *bot) welcome(users []*echotron.User) {
+	var names []string
+	for _, u := range users {
+		if !u.IsBot {
+			names = append(names, mention(u.ID, u.FirstName))
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+
+	_, err := b.SendMessage(
+		fmt.Sprintf(
+			"<b>Ciao %s, benvenuto/a nel gruppo del Caffè Letterario Bari! ☕️</b>\n\n"+
+				"Io sono il Cancelliere, il bot del gruppo.\n\n"+
+				"Se ti va di rompere il ghiaccio, raccontaci cosa stai leggendo ultimamente o quali sono i tuoi generi preferiti. "+
+				"E prima di buttarti nella conversazione, dai una rapida occhiata alle info del gruppo!",
+			strings.Join(names, ", "),
+		),
+		b.chatID,
+		&echotron.MessageOptions{
+			ParseMode: echotron.HTML,
+			ReplyMarkup: echotron.InlineKeyboardMarkup{
+				InlineKeyboard: [][]echotron.InlineKeyboardButton{
+					{{Text: "ℹ️ Informazioni", URL: infoURL}},
+				},
+			},
+		},
+	)
+	if err != nil {
+		log.Println("b.welcome", "b.SendMessage", err)
 	}
 }
 
@@ -211,20 +310,42 @@ func nextMeeting(now time.Time) time.Time {
 	return now.AddDate(0, 0, d)
 }
 
+var candidacyKeyboard = echotron.InlineKeyboardMarkup{
+	InlineKeyboard: [][]echotron.InlineKeyboardButton{
+		{
+			{Text: "Mi candido", CallbackData: "candidati"},
+			{Text: "Ritiro la candidatura", CallbackData: "ritira"},
+		},
+	},
+}
+
+// candidacyText is the candidacy message listing the current candidates.
+func candidacyText(names []string) string {
+	text := "📚 Sono aperte le candidature per scegliere il libro del mese.\nChi desidera proporsi può farlo entro il giorno 1: il nome verrà estratto a sorte tra i candidati."
+	if len(names) == 0 {
+		return text
+	}
+	return text + "\n\nCandidati:\n• " + strings.Join(names, "\n• ")
+}
+
+// updateCandidacy rewrites the candidacy message with the current candidates.
+// shortcut: two near-simultaneous clicks may land out of order and show a stale list until the next click; serialize edits if it shows up.
+func (b *bot) updateCandidacy(msgID int) {
+	_, err := b.EditMessageText(
+		candidacyText(b.candidateNames()),
+		echotron.NewMessageID(b.chatID, msgID),
+		&echotron.MessageTextOptions{ReplyMarkup: candidacyKeyboard},
+	)
+	if err != nil {
+		log.Println("b.updateCandidacy", "b.EditMessageText", err)
+	}
+}
+
 func (b *bot) sendCandidacy() {
 	res, err := b.SendMessage(
-		"📚 Sono aperte le candidature per scegliere il libro del mese.\nChi desidera proporsi può farlo entro il giorno 1: il nome verrà estratto a sorte tra i candidati.",
+		candidacyText(nil),
 		b.chatID,
-		&echotron.MessageOptions{
-			ReplyMarkup: echotron.InlineKeyboardMarkup{
-				InlineKeyboard: [][]echotron.InlineKeyboardButton{
-					{
-						{Text: "Mi candido", CallbackData: "candidati"},
-						{Text: "Ritiro la candidatura", CallbackData: "ritira"},
-					},
-				},
-			},
-		},
+		&echotron.MessageOptions{ReplyMarkup: candidacyKeyboard},
 	)
 	if err != nil {
 		log.Println("b.sendCandidacy", "b.SendMessage", err)
@@ -248,11 +369,7 @@ func (b *bot) drawPicker() {
 	}
 
 	_, err := b.SendMessage(
-		fmt.Sprintf(
-			`📚 È stato estratto/a <a href="tg://user?id=%d">%s</a>, a cui spetta la scelta del libro del mese. Attendiamo il titolo.`,
-			id,
-			html.EscapeString(name),
-		),
+		fmt.Sprintf("📚 È stato estratto/a %s, a cui spetta la scelta del libro del mese. Attendiamo il titolo.", mention(id, name)),
 		b.chatID,
 		&echotron.MessageOptions{ParseMode: echotron.HTML},
 	)
@@ -266,42 +383,66 @@ func (b *bot) sendReminder() {
 	place := b.Place
 	b.mu.Unlock()
 
+	question := "Chi c'è stasera alle 18:30?"
 	if place != "" {
-		place = "\nLuogo: " + place
+		// place carries its own preposition, e.g. "al Vergnano".
+		question = "Chi c'è stasera " + place + " alle 18:30?"
 	}
-	b.messagef("Si ricorda che oggi alle 18:30 si terrà l'incontro.%s", place)
-
-	_, err := b.SendPoll(
+	res, err := b.SendPoll(
 		b.chatID,
-		"Parteciperai all'incontro di oggi alle 18:30?",
+		question,
 		[]echotron.InputPollOption{{Text: "Ci sono"}, {Text: "Non ci sono"}},
-		&echotron.PollOptions{IsAnonymous: false},
+		&echotron.PollOptions{IsAnonymous: echotron.Ptr(false)},
 	)
 	if err != nil {
 		log.Println("b.sendReminder", "b.SendPoll", err)
+		return
+	}
+
+	// The poll itself already notified the chat.
+	if _, err := b.PinChatMessage(b.chatID, res.Result.ID, &echotron.PinMessageOptions{DisableNotification: true}); err != nil {
+		log.Println("b.sendReminder", "b.PinChatMessage", err)
+		return
+	}
+	// Unpinning the previous poll here covers a midnight missed while the bot was down.
+	b.unpinPoll(res.Result.ID)
+}
+
+// unpinPoll unpins the stored Saturday poll, if any, and stores next in its place.
+func (b *bot) unpinPoll(next int) {
+	if id := b.swapPollMsg(next); id != 0 && id != next {
+		if _, err := b.UnpinChatMessage(b.chatID, &echotron.UnpinMessageOptions{MessageID: id}); err != nil {
+			log.Println("b.unpinPoll", "b.UnpinChatMessage", err)
+		}
 	}
 }
 
-// tick runs this chat's scheduled jobs once a day, at 10:00.
+// tick runs this chat's scheduled jobs: the poll unpin at 00:00, the rest at 10:00.
 func (b *bot) tick() {
 	for t := range time.Tick(time.Minute) {
 		now := t.In(rome)
-		if now.Hour() != 10 || now.Minute() != 0 {
+		if now.Minute() != 0 {
 			continue
 		}
 
-		if now.Day() == 25 {
-			b.sendCandidacy()
-		}
-		if now.Day() == 1 {
-			b.drawPicker()
-		}
+		switch now.Hour() {
+		case 0:
+			b.unpinPoll(0)
 
-		b.mu.Lock()
-		skip := b.SkipDate == now.Format(time.DateOnly)
-		b.mu.Unlock()
-		if now.Weekday() == time.Saturday && !skip {
-			b.sendReminder()
+		case 10:
+			if now.Day() == 25 {
+				b.sendCandidacy()
+			}
+			if now.Day() == 1 {
+				b.drawPicker()
+			}
+
+			b.mu.Lock()
+			skip := b.SkipDate == now.Format(time.DateOnly)
+			b.mu.Unlock()
+			if now.Weekday() == time.Saturday && !skip {
+				b.sendReminder()
+			}
 		}
 	}
 }
@@ -328,6 +469,7 @@ func userID(u *echotron.Update) int64 {
 
 func main() {
 	flag.StringVar(&token, "t", token, "The Telegram token of the bot.")
+	flag.StringVar(&infoURL, "i", infoURL, "The URL of the group info page.")
 	flag.Parse()
 	// An editor may leave a trailing newline in the TOKEN file.
 	token = strings.TrimSpace(token)

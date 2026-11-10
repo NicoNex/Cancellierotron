@@ -19,6 +19,8 @@ type session struct {
 	Place      string           // meeting place; empty means not set
 	// CandidacyMsg is the ID of the open candidacy message; 0 means closed.
 	CandidacyMsg int
+	// PollMsg is the ID of the pinned Saturday poll; 0 means none.
+	PollMsg int
 }
 
 var db katalis.DB[int64, session]
@@ -30,28 +32,34 @@ func (b *bot) save() {
 	}
 }
 
-// addCandidate returns false if msgID is not the open candidacy message.
-func (b *bot) addCandidate(msgID int, id int64, name string) bool {
+// addCandidate reports whether msgID is the open candidacy message and whether the list changed.
+func (b *bot) addCandidate(msgID int, id int64, name string) (open, changed bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if msgID == 0 || msgID != b.CandidacyMsg {
-		return false
+		return false, false
+	}
+	if old, ok := b.Candidates[id]; ok && old == name {
+		return true, false
 	}
 	b.Candidates[id] = name
 	b.save()
-	return true
+	return true, true
 }
 
-// removeCandidate returns false if msgID is not the open candidacy message.
-func (b *bot) removeCandidate(msgID int, id int64) bool {
+// removeCandidate reports whether msgID is the open candidacy message and whether the list changed.
+func (b *bot) removeCandidate(msgID int, id int64) (open, changed bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if msgID == 0 || msgID != b.CandidacyMsg {
-		return false
+		return false, false
+	}
+	if _, ok := b.Candidates[id]; !ok {
+		return true, false
 	}
 	delete(b.Candidates, id)
 	b.save()
-	return true
+	return true, true
 }
 
 // openCandidacy clears the candidates and accepts them only from msgID.
@@ -80,11 +88,30 @@ func (b *bot) setSkipDate(date string) {
 	b.save()
 }
 
+// swapPollMsg stores id as the pinned poll and returns the previous one.
+func (b *bot) swapPollMsg(id int) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	old := b.PollMsg
+	if old != id {
+		b.PollMsg = id
+		b.save()
+	}
+	return old
+}
+
 func (b *bot) setPlace(place string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.Place = place
 	b.save()
+}
+
+// candidateNames returns the candidates' names, sorted.
+func (b *bot) candidateNames() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Sorted(maps.Values(b.Candidates))
 }
 
 // popRandomCandidate picks a random candidate and clears the list; ok is false if empty.
