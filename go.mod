@@ -1,4 +1,4 @@
-module github.com/NicoNex/ciambellanotron
+module github.com/NicoNex/cancellierotron
 
 go 1.26.4
 

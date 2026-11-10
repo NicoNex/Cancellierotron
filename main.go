@@ -173,15 +173,21 @@ func (b *bot) setPlaceState(update *echotron.Update) stateFn {
 }
 
 func (b *bot) handleCallback(q *echotron.CallbackQuery) {
-	var text string
+	var msgID int
+	if q.Message != nil {
+		msgID = q.Message.ID
+	}
 
+	text := "Le candidature sono chiuse."
 	switch q.Data {
 	case "candidati":
-		b.addCandidate(q.From.ID, q.From.FirstName)
-		text = "Candidatura registrata."
+		if b.addCandidate(msgID, q.From.ID, q.From.FirstName) {
+			text = "Candidatura registrata."
+		}
 	case "ritira":
-		b.removeCandidate(q.From.ID)
-		text = "Candidatura ritirata."
+		if b.removeCandidate(msgID, q.From.ID) {
+			text = "Candidatura ritirata."
+		}
 	}
 
 	_, err := b.AnswerCallbackQuery(q.ID, &echotron.CallbackQueryOptions{Text: text})
@@ -206,9 +212,7 @@ func nextMeeting(now time.Time) time.Time {
 }
 
 func (b *bot) sendCandidacy() {
-	b.clearCandidates()
-
-	_, err := b.SendMessage(
+	res, err := b.SendMessage(
 		"📚 Sono aperte le candidature per scegliere il libro del mese.\nChi desidera proporsi può farlo entro il giorno 1: il nome verrà estratto a sorte tra i candidati.",
 		b.chatID,
 		&echotron.MessageOptions{
@@ -224,10 +228,19 @@ func (b *bot) sendCandidacy() {
 	)
 	if err != nil {
 		log.Println("b.sendCandidacy", "b.SendMessage", err)
+		return
 	}
+	b.openCandidacy(res.Result.ID)
 }
 
 func (b *bot) drawPicker() {
+	// Remove the buttons so the closed candidacy is visible in the chat.
+	if msgID := b.closeCandidacy(); msgID != 0 {
+		if _, err := b.EditMessageReplyMarkup(echotron.NewMessageID(b.chatID, msgID), nil); err != nil {
+			log.Println("b.drawPicker", "b.EditMessageReplyMarkup", err)
+		}
+	}
+
 	id, name, ok := b.popRandomCandidate()
 	if !ok {
 		b.messagef("Questo mese non ci sono state candidature per la scelta del libro.")
@@ -269,11 +282,11 @@ func (b *bot) sendReminder() {
 	}
 }
 
-// tick runs this chat's scheduled jobs once a day, during the 10 o'clock hour.
+// tick runs this chat's scheduled jobs once a day, at 10:00.
 func (b *bot) tick() {
-	for t := range time.Tick(time.Hour) {
+	for t := range time.Tick(time.Minute) {
 		now := t.In(rome)
-		if now.Hour() != 10 {
+		if now.Hour() != 10 || now.Minute() != 0 {
 			continue
 		}
 

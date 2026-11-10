@@ -17,6 +17,8 @@ type session struct {
 	Candidates map[int64]string // user ID -> display name
 	SkipDate   string           // date (time.DateOnly) of a cancelled Saturday meeting
 	Place      string           // meeting place; empty means not set
+	// CandidacyMsg is the ID of the open candidacy message; 0 means closed.
+	CandidacyMsg int
 }
 
 var db katalis.DB[int64, session]
@@ -28,25 +30,47 @@ func (b *bot) save() {
 	}
 }
 
-func (b *bot) addCandidate(id int64, name string) {
+// addCandidate returns false if msgID is not the open candidacy message.
+func (b *bot) addCandidate(msgID int, id int64, name string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if msgID == 0 || msgID != b.CandidacyMsg {
+		return false
+	}
 	b.Candidates[id] = name
 	b.save()
+	return true
 }
 
-func (b *bot) removeCandidate(id int64) {
+// removeCandidate returns false if msgID is not the open candidacy message.
+func (b *bot) removeCandidate(msgID int, id int64) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if msgID == 0 || msgID != b.CandidacyMsg {
+		return false
+	}
 	delete(b.Candidates, id)
 	b.save()
+	return true
 }
 
-func (b *bot) clearCandidates() {
+// openCandidacy clears the candidates and accepts them only from msgID.
+func (b *bot) openCandidacy(msgID int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	clear(b.Candidates)
+	b.CandidacyMsg = msgID
 	b.save()
+}
+
+// closeCandidacy stops accepting candidates and returns the closed message ID.
+func (b *bot) closeCandidacy() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	msgID := b.CandidacyMsg
+	b.CandidacyMsg = 0
+	b.save()
+	return msgID
 }
 
 func (b *bot) setSkipDate(date string) {

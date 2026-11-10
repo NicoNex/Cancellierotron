@@ -1,9 +1,11 @@
 package main
 
 import (
-	"github.com/NicoNex/echotron/v3"
 	"testing"
 	"time"
+
+	"github.com/NicoNex/echotron/v3"
+	"github.com/NicoNex/katalis"
 )
 
 func TestNextMeeting(t *testing.T) {
@@ -54,5 +56,31 @@ func TestCommand(t *testing.T) {
 		if got := command(in); got != want {
 			t.Errorf("command(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCandidacyWindow(t *testing.T) {
+	var err error
+	if db, err = katalis.Open(t.TempDir(), katalis.Int64Codec, katalis.Gob[session]()); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	b := bot{chatID: 1, session: session{Candidates: map[int64]string{}}}
+	if b.addCandidate(0, 1, "a") {
+		t.Fatal("candidacy accepted before opening")
+	}
+	b.openCandidacy(42)
+	if b.addCandidate(41, 1, "a") {
+		t.Fatal("candidacy accepted from an old message")
+	}
+	if !b.addCandidate(42, 1, "a") {
+		t.Fatal("candidacy rejected while open")
+	}
+	if got := b.closeCandidacy(); got != 42 {
+		t.Fatalf("closeCandidacy = %d, want 42", got)
+	}
+	if b.addCandidate(42, 2, "b") || b.removeCandidate(42, 1) {
+		t.Fatal("candidacy changed after closing")
 	}
 }
