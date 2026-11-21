@@ -34,7 +34,7 @@ var (
 	stateTimeout = 5 * time.Minute
 
 	// infoURL is the group info page; a telegra.ph page opens in Telegram's Instant View.
-	infoURL = "https://telegra.ph/"
+	infoURL = "https://telegra.ph/Caff%C3%A8-Letterario-Bari-11-21"
 
 	commands = []echotron.BotCommand{
 		{Command: "/annulla", Description: "Annulla il prossimo incontro del sabato (solo admin)."},
