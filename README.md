@@ -42,6 +42,9 @@ Se l'incontro è stato annullato, il promemoria non parte.
 | `/cancella_luogo` | Rimuove il luogo dell'incontro. |
 | `/debug` | Comando nascosto. Mostra dei pulsanti per eseguire subito: apertura candidature, estrazione, sondaggi dell'incontro, promemoria del sabato, benvenuto. |
 
+### Chat private
+Il bot funziona solo nei gruppi: in chat privata non risponde.
+
 ## Avvio
 
 Mettere il token del bot nel file `TOKEN` (viene incluso nel binario) oppure passarlo con `-t`.
