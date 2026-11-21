@@ -30,13 +30,17 @@ Quando entra un nuovo membro (non bot), il bot lo saluta per nome e mostra un pu
 Il bot fissa in alto il primo sondaggio e lo sblocca la domenica a mezzanotte.
 Se un admin ha annullato l'incontro di quel sabato, i sondaggi non vengono inviati.
 
+### Promemoria del sabato
+**Ogni sabato, alle 10:00**, il bot ricorda l'incontro della sera (con il luogo, se impostato) e menziona chi ha detto che partecipa nel primo sondaggio del mercoledì. Se nessuno ha ancora risposto, invita a farlo. Se mercoledì il sondaggio non è partito, ricorda solo l'incontro.
+Se l'incontro è stato annullato, il promemoria non parte.
+
 ### Comandi (solo admin)
 | Comando | Effetto |
 |---|---|
-| `/annulla` | Annulla il prossimo incontro del sabato: quella settimana i sondaggi non partono. Durante `/luogo` annulla l'operazione. |
-| `/luogo` | Chiede il luogo dell'incontro, con la preposizione davanti (es. "al Vergnano"), massimo 200 caratteri. Il luogo compare nel primo sondaggio. |
+| `/annulla` | Annulla il prossimo incontro del sabato: quella settimana non partono né i sondaggi né il promemoria. Durante `/luogo` annulla l'operazione. |
+| `/luogo` | Chiede il luogo dell'incontro, con la preposizione davanti (es. "al Vergnano"), massimo 200 caratteri. Il luogo compare nel primo sondaggio e nel promemoria del sabato. |
 | `/cancella_luogo` | Rimuove il luogo dell'incontro. |
-| `/debug` | Comando nascosto. Mostra dei pulsanti per eseguire subito: apertura candidature, estrazione, sondaggi dell'incontro, benvenuto. |
+| `/debug` | Comando nascosto. Mostra dei pulsanti per eseguire subito: apertura candidature, estrazione, sondaggi dell'incontro, promemoria del sabato, benvenuto. |
 
 ## Avvio
 
@@ -46,7 +50,7 @@ Mettere il token del bot nel file `TOKEN` (viene incluso nel binario) oppure pas
 go build && ./cancellierotron [-t TOKEN] [-i URL_PAGINA_INFO]
 ```
 
-I dati di ogni chat (candidati, luogo, incontro annullato, sondaggio fissato) sono salvati nella cartella di cache dell'utente, sotto `ciambellanotron`.
+I dati di ogni chat (candidati, luogo, incontro annullato, sondaggio fissato e chi partecipa) sono salvati nella cartella di cache dell'utente, sotto `ciambellanotron`.
 
 ## Licenza
 

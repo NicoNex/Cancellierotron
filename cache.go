@@ -21,6 +21,9 @@ type session struct {
 	CandidacyMsg int
 	// PollMsg is the ID of the pinned meeting poll; 0 means none.
 	PollMsg int
+	// PollID is the Telegram ID of the attendance poll, used to match the votes.
+	PollID    string
+	Attendees map[int64]string // user ID -> display name of who said they come
 }
 
 var db katalis.DB[int64, session]
@@ -88,16 +91,42 @@ func (b *bot) setSkipDate(date string) {
 	b.save()
 }
 
-// swapPollMsg stores id as the pinned poll and returns the previous one.
-func (b *bot) swapPollMsg(id int) int {
+// swapPoll stores msgID and pollID as the attendance poll, resets the attendees
+// and returns the previous poll message ID.
+func (b *bot) swapPoll(msgID int, pollID string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	old := b.PollMsg
-	if old != id {
-		b.PollMsg = id
-		b.save()
+	polls.Delete(b.PollID)
+	if pollID != "" {
+		polls.Store(pollID, b)
 	}
+	b.PollMsg, b.PollID = msgID, pollID
+	b.Attendees = make(map[int64]string)
+	b.save()
 	return old
+}
+
+// vote records whether the user comes, if pollID is the current attendance poll.
+func (b *bot) vote(pollID string, id int64, name string, coming bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if pollID != b.PollID {
+		return
+	}
+	if coming {
+		b.Attendees[id] = name
+	} else {
+		delete(b.Attendees, id)
+	}
+	b.save()
+}
+
+// attendees returns a copy of who said they come; polled is false if no poll is open.
+func (b *bot) attendees() (who map[int64]string, polled bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return maps.Clone(b.Attendees), b.PollID != ""
 }
 
 func (b *bot) setPlace(place string) {
@@ -105,6 +134,12 @@ func (b *bot) setPlace(place string) {
 	defer b.mu.Unlock()
 	b.Place = place
 	b.save()
+}
+
+func (b *bot) meetingPlace() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Place
 }
 
 // candidateNames returns the candidates' names, sorted.

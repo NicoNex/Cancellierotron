@@ -104,3 +104,30 @@ func TestCandidacyWindow(t *testing.T) {
 		t.Fatal("candidacy changed after closing")
 	}
 }
+
+func TestAttendance(t *testing.T) {
+	var err error
+	if db, err = katalis.Open(t.TempDir(), katalis.Int64Codec, katalis.Gob[session]()); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	b := &bot{chatID: -1}
+	b.swapPoll(10, "p1")
+	voterRelay{}.Update(&echotron.Update{PollAnswer: &echotron.PollAnswer{PollID: "p1", User: &echotron.User{ID: 1, FirstName: "a"}, OptionIDs: []int{0}}})
+	b.vote("p1", 2, "b", true)
+	b.vote("old", 3, "c", true)
+	b.vote("p1", 2, "b", false)
+	if got, polled := b.attendees(); !polled || len(got) != 1 || got[1] != "a" {
+		t.Fatalf("attendees = %v, want only a", got)
+	}
+	if old := b.swapPoll(0, ""); old != 10 {
+		t.Fatal("swapPoll did not return the old poll")
+	}
+	if got, polled := b.attendees(); polled || len(got) != 0 {
+		t.Fatal("swapPoll did not reset the poll")
+	}
+	if _, ok := polls.Load("p1"); ok {
+		t.Fatal("old poll still routed")
+	}
+}
