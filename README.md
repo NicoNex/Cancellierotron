@@ -10,6 +10,8 @@ Tutti gli orari sono riferiti a Europe/Rome.
 Quando entra un nuovo membro (non bot), il bot lo saluta per nome e mostra un pulsante "ℹ️ Informazioni" che apre la pagina info del gruppo.
 
 ### Candidature per il libro del mese
+Il libro del mese è il libro che il Caffè Letterario propone per quel mese: non lo leggono tutti, ma viene consigliato a chi vuole, anche a chi non fa parte del gruppo. Agli incontri ognuno continua a portare il libro che sta leggendo.
+
 - **Il 25 di ogni mese, alle 10:00**, il bot apre le candidature con un messaggio e due pulsanti: "Mi candido" e "Ritiro la candidatura". Ci si può candidare fino alle 10:00 del giorno 1.
 - Il messaggio si aggiorna con l'elenco dei candidati.
 - **Il 1° di ogni mese, alle 10:00**, il bot chiude le candidature (toglie i pulsanti) ed estrae a sorte chi sceglie il libro del mese. Se non c'è nessun candidato lo comunica.

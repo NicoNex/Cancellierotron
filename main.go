@@ -353,7 +353,9 @@ var candidacyKeyboard = echotron.InlineKeyboardMarkup{
 
 // candidacyText is the candidacy message listing the current candidates.
 func candidacyText(names []string) string {
-	text := "📚 Sono aperte le candidature per scegliere il libro del mese.\nChi vuole proporsi può farlo entro le 10:00 del giorno 1: tra i candidati verrà estratto a sorte chi sceglierà il libro."
+	text := "📚 Sono aperte le candidature per scegliere il libro del mese.\n" +
+		"È il libro che il Caffè Letterario propone per il mese: non lo leggiamo tutti, lo consigliamo a chi vuole, anche fuori dal gruppo.\n" +
+		"Chi vuole proporsi può farlo entro le 10:00 del giorno 1: tra i candidati verrà estratto a sorte chi sceglierà il libro."
 	if len(names) == 0 {
 		return text
 	}
