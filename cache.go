@@ -142,11 +142,11 @@ func (b *bot) meetingPlace() string {
 	return b.Place
 }
 
-// candidateNames returns the candidates' names, sorted.
-func (b *bot) candidateNames() []string {
+// candidates returns a copy of the candidates.
+func (b *bot) candidates() map[int64]string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return slices.Sorted(maps.Values(b.Candidates))
+	return maps.Clone(b.Candidates)
 }
 
 // popRandomCandidate picks a random candidate and clears the list; ok is false if empty.

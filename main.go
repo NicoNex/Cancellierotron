@@ -287,6 +287,15 @@ var debugActions = []struct {
 	{"Benvenuto", "debug_benvenuto", func(b *bot, q *echotron.CallbackQuery) { b.welcome([]*echotron.User{q.From}) }},
 }
 
+// bulletList is a bulleted list of clickable mentions of users (ID -> name), sorted by name.
+func bulletList(users map[int64]string) string {
+	var lines []string
+	for _, id := range slices.SortedFunc(maps.Keys(users), func(x, y int64) int { return strings.Compare(users[x], users[y]) }) {
+		lines = append(lines, "• "+mention(id, users[id]))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // mention is an HTML link to the user's profile.
 func mention(id int64, name string) string {
 	return fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, id, html.EscapeString(name))
@@ -351,24 +360,24 @@ var candidacyKeyboard = echotron.InlineKeyboardMarkup{
 	},
 }
 
-// candidacyText is the candidacy message listing the current candidates.
-func candidacyText(names []string) string {
+// candidacyText is the candidacy message (HTML) listing the current candidates.
+func candidacyText(candidates map[int64]string) string {
 	text := "📚 Sono aperte le candidature per scegliere il libro del mese.\n" +
 		"È il libro che il Caffè Letterario propone per il mese: non lo leggiamo tutti, lo consigliamo a chi vuole, anche fuori dal gruppo.\n" +
 		"Chi vuole proporsi può farlo entro le 10:00 del giorno 1: tra i candidati verrà estratto a sorte chi sceglierà il libro."
-	if len(names) == 0 {
+	if len(candidates) == 0 {
 		return text
 	}
-	return text + "\n\nCandidati:\n• " + strings.Join(names, "\n• ")
+	return text + "\n\nCandidati:\n" + bulletList(candidates)
 }
 
 // updateCandidacy rewrites the candidacy message with the current candidates.
 // shortcut: two near-simultaneous clicks may land out of order and show a stale list until the next click; serialize edits if it shows up.
 func (b *bot) updateCandidacy(msgID int) {
 	_, err := b.EditMessageText(
-		candidacyText(b.candidateNames()),
+		candidacyText(b.candidates()),
 		echotron.NewMessageID(b.chatID, msgID),
-		&echotron.MessageTextOptions{ReplyMarkup: candidacyKeyboard},
+		&echotron.MessageTextOptions{ParseMode: echotron.HTML, ReplyMarkup: candidacyKeyboard},
 	)
 	if err != nil {
 		log.Println("b.updateCandidacy", "b.EditMessageText", err)
@@ -379,7 +388,7 @@ func (b *bot) sendCandidacy() {
 	res, err := b.SendMessage(
 		candidacyText(nil),
 		b.chatID,
-		&echotron.MessageOptions{ReplyMarkup: candidacyKeyboard},
+		&echotron.MessageOptions{ParseMode: echotron.HTML, ReplyMarkup: candidacyKeyboard},
 	)
 	if err != nil {
 		log.Println("b.sendCandidacy", "b.SendMessage", err)
@@ -480,11 +489,7 @@ func (b *bot) remindMeeting() {
 	case len(who) == 0:
 		text += "\n\nNessuno ha ancora risposto al sondaggio di mercoledì: fatelo ora!"
 	default:
-		var names []string
-		for _, id := range slices.SortedFunc(maps.Keys(who), func(x, y int64) int { return strings.Compare(who[x], who[y]) }) {
-			names = append(names, mention(id, who[id]))
-		}
-		text += "\n\nCi saranno: " + strings.Join(names, ", ") + "."
+		text += "\n\nCi saranno:\n" + bulletList(who)
 	}
 
 	if _, err := b.SendMessage(text, b.chatID, &echotron.MessageOptions{ParseMode: echotron.HTML}); err != nil {

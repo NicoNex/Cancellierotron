@@ -87,7 +87,8 @@ func TestCandidacyWindow(t *testing.T) {
 	if _, changed := b.addCandidate(42, 1, "a"); changed {
 		t.Fatal("re-adding the same candidate reported a change")
 	}
-	if got := candidacyText(b.candidateNames()); !strings.HasSuffix(got, "Candidati:\n• Bea\n• a") {
+	want := "Candidati:\n• " + mention(2, "Bea") + "\n• " + mention(1, "a")
+	if got := candidacyText(b.candidates()); !strings.HasSuffix(got, want) {
 		t.Fatalf("candidacyText = %q", got)
 	}
 	if _, changed := b.removeCandidate(42, 3); changed {

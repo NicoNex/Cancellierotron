@@ -13,7 +13,7 @@ Quando entra un nuovo membro (non bot), il bot lo saluta per nome e mostra un pu
 Il libro del mese è il libro che il Caffè Letterario propone per quel mese: non lo leggono tutti, ma viene consigliato a chi vuole, anche a chi non fa parte del gruppo. Agli incontri ognuno continua a portare il libro che sta leggendo.
 
 - **Il 25 di ogni mese, alle 10:00**, il bot apre le candidature con un messaggio e due pulsanti: "Mi candido" e "Ritiro la candidatura". Ci si può candidare fino alle 10:00 del giorno 1.
-- Il messaggio si aggiorna con l'elenco dei candidati.
+- Il messaggio si aggiorna con l'elenco puntato dei candidati; i nomi sono cliccabili e aprono il profilo.
 - **Il 1° di ogni mese, alle 10:00**, il bot chiude le candidature (toglie i pulsanti) ed estrae a sorte chi sceglie il libro del mese. Se non c'è nessun candidato lo comunica.
 
 ### Sondaggi per l'incontro del sabato
@@ -33,7 +33,7 @@ Il bot fissa in alto il primo sondaggio e lo sblocca la domenica a mezzanotte.
 Se un admin ha annullato l'incontro di quel sabato, i sondaggi non vengono inviati.
 
 ### Promemoria del sabato
-**Ogni sabato, alle 10:00**, il bot ricorda l'incontro della sera (con il luogo, se impostato) e menziona chi ha detto che partecipa nel primo sondaggio del mercoledì. Se nessuno ha ancora risposto, invita a farlo. Se mercoledì il sondaggio non è partito, ricorda solo l'incontro.
+**Ogni sabato, alle 10:00**, il bot ricorda l'incontro della sera (con il luogo, se impostato) e mostra in un elenco puntato, con i nomi cliccabili, chi ha detto che partecipa nel primo sondaggio del mercoledì. Se nessuno ha ancora risposto, invita a farlo. Se mercoledì il sondaggio non è partito, ricorda solo l'incontro.
 Se l'incontro è stato annullato, il promemoria non parte.
 
 ### Comandi (solo admin)
