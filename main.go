@@ -35,7 +35,7 @@ var (
 	infoURL = "https://telegra.ph/"
 
 	commands = []echotron.BotCommand{
-		{Command: "/annulla", Description: "Annulla l'incontro di sabato (solo admin)."},
+		{Command: "/annulla", Description: "Annulla il prossimo incontro del sabato (solo admin)."},
 		{Command: "/luogo", Description: "Imposta il luogo dell'incontro (solo admin)."},
 		{Command: "/cancella_luogo", Description: "Cancella il luogo dell'incontro (solo admin)."},
 	}
@@ -321,7 +321,7 @@ var candidacyKeyboard = echotron.InlineKeyboardMarkup{
 
 // candidacyText is the candidacy message listing the current candidates.
 func candidacyText(names []string) string {
-	text := "📚 Sono aperte le candidature per scegliere il libro del mese.\nChi desidera proporsi può farlo entro il giorno 1: il nome verrà estratto a sorte tra i candidati."
+	text := "📚 Sono aperte le candidature per scegliere il libro del mese.\nChi vuole proporsi può farlo entro le 10:00 del giorno 1: tra i candidati verrà estratto a sorte chi sceglierà il libro."
 	if len(names) == 0 {
 		return text
 	}
@@ -369,7 +369,7 @@ func (b *bot) drawPicker() {
 	}
 
 	_, err := b.SendMessage(
-		fmt.Sprintf("📚 È stato estratto/a %s, a cui spetta la scelta del libro del mese. Attendiamo il titolo.", mention(id, name)),
+		fmt.Sprintf("📚 L'estrazione ha scelto %s: tocca a te scegliere il libro del mese! Attendiamo il titolo.", mention(id, name)),
 		b.chatID,
 		&echotron.MessageOptions{ParseMode: echotron.HTML},
 	)
@@ -408,7 +408,7 @@ func (b *bot) sendReminder() {
 	}
 	if _, err := b.SendPoll(
 		b.chatID,
-		"Chi vuole leggere dei passi a questa sessione di caffè letterario?",
+		"Chi vuole leggere dei passi durante il prossimo incontro del caffè letterario?",
 		[]echotron.InputPollOption{{Text: "Leggo"}, {Text: "Ascolto"}},
 		opts,
 	); err != nil {
