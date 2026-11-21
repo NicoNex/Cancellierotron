@@ -13,6 +13,7 @@ func TestNextMeeting(t *testing.T) {
 	loc := time.UTC
 	cases := []struct{ now, want string }{
 		{"2026-11-09 12:00", "2026-11-14"}, // Monday -> same week
+		{"2026-11-11 10:00", "2026-11-14"}, // Wednesday poll -> same week
 		{"2026-11-14 10:00", "2026-11-14"}, // Saturday morning -> today
 		{"2026-11-14 18:30", "2026-11-21"}, // Saturday after start -> next week
 		{"2026-11-15 09:00", "2026-11-21"}, // Sunday -> next week

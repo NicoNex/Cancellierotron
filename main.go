@@ -251,7 +251,7 @@ var debugActions = []struct {
 }{
 	{"Apri candidature", "debug_candidature", func(b *bot, _ *echotron.CallbackQuery) { b.sendCandidacy() }},
 	{"Estrai candidato", "debug_estrazione", func(b *bot, _ *echotron.CallbackQuery) { b.drawPicker() }},
-	{"Promemoria sabato", "debug_promemoria", func(b *bot, _ *echotron.CallbackQuery) { b.sendReminder() }},
+	{"Sondaggi incontro", "debug_promemoria", func(b *bot, _ *echotron.CallbackQuery) { b.sendReminder() }},
 	{"Benvenuto", "debug_benvenuto", func(b *bot, q *echotron.CallbackQuery) { b.welcome([]*echotron.User{q.From}) }},
 }
 
@@ -378,25 +378,41 @@ func (b *bot) drawPicker() {
 	}
 }
 
+// sendReminder sends the two non-anonymous polls for the next Saturday meeting and pins the first.
 func (b *bot) sendReminder() {
 	b.mu.Lock()
 	place := b.Place
 	b.mu.Unlock()
 
-	question := "Chi c'è stasera alle 18:30?"
+	when := "Sabato " + nextMeeting(time.Now().In(rome)).Format("02/01") + " ci vediamo alle 18:30"
 	if place != "" {
 		// place carries its own preposition, e.g. "al Vergnano".
-		question = "Chi c'è stasera " + place + " alle 18:30?"
+		when += " " + place
 	}
+	opts := &echotron.PollOptions{IsAnonymous: echotron.Ptr(false)}
 	res, err := b.SendPoll(
 		b.chatID,
-		question,
-		[]echotron.InputPollOption{{Text: "Ci sono"}, {Text: "Non ci sono"}},
-		&echotron.PollOptions{IsAnonymous: echotron.Ptr(false)},
+		when+": come partecipi?",
+		[]echotron.InputPollOption{
+			{Text: "Bar e poi pizza"},
+			{Text: "Parco e poi pizza"},
+			{Text: "Vengo solo al bar"},
+			{Text: "Vengo solo al parco"},
+			{Text: "Vengo solo per la pizza"},
+		},
+		opts,
 	)
 	if err != nil {
 		log.Println("b.sendReminder", "b.SendPoll", err)
 		return
+	}
+	if _, err := b.SendPoll(
+		b.chatID,
+		"Chi vuole leggere dei passi a questa sessione di caffè letterario?",
+		[]echotron.InputPollOption{{Text: "Leggo"}, {Text: "Ascolto"}},
+		opts,
+	); err != nil {
+		log.Println("b.sendReminder", "b.SendPoll", err)
 	}
 
 	// The poll itself already notified the chat.
@@ -404,11 +420,11 @@ func (b *bot) sendReminder() {
 		log.Println("b.sendReminder", "b.PinChatMessage", err)
 		return
 	}
-	// Unpinning the previous poll here covers a midnight missed while the bot was down.
+	// Unpinning the previous poll here covers a Sunday midnight missed while the bot was down.
 	b.unpinPoll(res.Result.ID)
 }
 
-// unpinPoll unpins the stored Saturday poll, if any, and stores next in its place.
+// unpinPoll unpins the stored meeting poll, if any, and stores next in its place.
 func (b *bot) unpinPoll(next int) {
 	if id := b.swapPollMsg(next); id != 0 && id != next {
 		if _, err := b.UnpinChatMessage(b.chatID, &echotron.UnpinMessageOptions{MessageID: id}); err != nil {
@@ -417,7 +433,7 @@ func (b *bot) unpinPoll(next int) {
 	}
 }
 
-// tick runs this chat's scheduled jobs: the poll unpin at 00:00, the rest at 10:00.
+// tick runs this chat's scheduled jobs: the poll unpin at 00:00 on Sunday, the rest at 10:00.
 func (b *bot) tick() {
 	for t := range time.Tick(time.Minute) {
 		now := t.In(rome)
@@ -427,7 +443,10 @@ func (b *bot) tick() {
 
 		switch now.Hour() {
 		case 0:
-			b.unpinPoll(0)
+			// The poll stays pinned from Wednesday until the Saturday meeting is over.
+			if now.Weekday() == time.Sunday {
+				b.unpinPoll(0)
+			}
 
 		case 10:
 			if now.Day() == 25 {
@@ -438,9 +457,9 @@ func (b *bot) tick() {
 			}
 
 			b.mu.Lock()
-			skip := b.SkipDate == now.Format(time.DateOnly)
+			skip := b.SkipDate == nextMeeting(now).Format(time.DateOnly)
 			b.mu.Unlock()
-			if now.Weekday() == time.Saturday && !skip {
+			if now.Weekday() == time.Wednesday && !skip {
 				b.sendReminder()
 			}
 		}

@@ -19,7 +19,7 @@ type session struct {
 	Place      string           // meeting place; empty means not set
 	// CandidacyMsg is the ID of the open candidacy message; 0 means closed.
 	CandidacyMsg int
-	// PollMsg is the ID of the pinned Saturday poll; 0 means none.
+	// PollMsg is the ID of the pinned meeting poll; 0 means none.
 	PollMsg int
 }
 
